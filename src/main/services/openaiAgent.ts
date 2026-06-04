@@ -20,6 +20,11 @@ const suggestedReplySchema = z.preprocess(
   }),
 );
 
+const suggestedRepliesSchema = z.preprocess(
+  normalizeArrayField,
+  z.array(suggestedReplySchema).default([]),
+);
+
 const calendarProposalSchema = z.object({
   summary: z.string().min(1),
   description: z.string().default(''),
@@ -31,12 +36,19 @@ const calendarProposalSchema = z.object({
   rationale: z.string().optional(),
 });
 
+const optionalCalendarProposalSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  calendarProposalSchema.optional(),
+);
+
+const risksSchema = z.preprocess(normalizeArrayField, z.array(modelTextSchema).default([]));
+
 const analysisSchema = z.object({
   summary: modelTextSchema,
   intent: intentSchema,
-  suggestedReplies: z.array(suggestedReplySchema).default([]),
-  calendarProposal: calendarProposalSchema.optional(),
-  risks: z.array(modelTextSchema).default([]),
+  suggestedReplies: suggestedRepliesSchema,
+  calendarProposal: optionalCalendarProposalSchema,
+  risks: risksSchema,
 });
 
 interface ChatCompletionResponse {
@@ -106,6 +118,13 @@ function normalizeSuggestedReply(value: unknown): unknown {
     tone: reply.tone ?? reply.style ?? 'professional',
     body: reply.body ?? reply.message ?? reply.content ?? reply.text ?? reply.reply,
   };
+}
+
+function normalizeArrayField(value: unknown): unknown {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') return value.trim() ? [value] : [];
+  return [value];
 }
 
 function cleanFallbackText(value: string): string {

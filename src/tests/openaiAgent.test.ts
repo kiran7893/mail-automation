@@ -110,6 +110,7 @@ describe('extractJsonObject', () => {
                     message: 'Can you send the venue details?',
                   },
                 ],
+                calendarProposal: null,
                 risks: ['<strong>Review before sending.</strong>'],
               }),
             },
@@ -134,6 +135,7 @@ describe('extractJsonObject', () => {
       tone: 'concise',
       body: 'Can you send the venue details?',
     });
+    expect(result.calendarProposal).toBeUndefined();
     expect(result.suggestedReplies).toHaveLength(3);
     expect(result.risks).toEqual(['Review before sending.']);
   });

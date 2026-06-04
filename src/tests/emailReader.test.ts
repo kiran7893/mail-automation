@@ -66,6 +66,31 @@ Somewhat
 xing.com
 `;
 
+const redditDigest = `
+[
+r/StoryIdeas: I am not a writer but have a great story concept!
+
+[
+[   Solid_Youth_4833
+
+[ Solid_Youth_4833
+[
+Subreddit Icon
+
+[
+click.redditmail.com
+r/StoryIdeas
+
+[
+u/AlternativePlan971
+
+[
+• 23h ago
+
+[
+I am not a writer but have a great story concept!
+`;
+
 describe('cleanEmailForDisplay', () => {
   it('removes invisible characters and HTML fragments', () => {
     expect(cleanDisplayText('6/3/2026 ͏ <strong class="font-bold">software engineer</strong>')).toBe(
@@ -109,5 +134,18 @@ describe('cleanEmailForDisplay', () => {
     expect(visibleText).not.toContain('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
     expect(visibleText).not.toContain('Tell us what you think');
     expect(hiddenText).toContain('Tell us what you think');
+  });
+
+  it('removes Reddit markdown artifacts while preserving post content', () => {
+    const cleaned = cleanEmailForDisplay(redditDigest);
+    const visibleText = JSON.stringify(cleaned.visible);
+
+    expect(visibleText).toContain('r/StoryIdeas: I am not a writer but have a great story concept!');
+    expect(visibleText).toContain('Solid_Youth_4833');
+    expect(visibleText).toContain('u/AlternativePlan971');
+    expect(visibleText).toContain('• 23h ago');
+    expect(visibleText).not.toContain('["["]');
+    expect(visibleText).not.toContain('Subreddit Icon');
+    expect(visibleText).not.toContain('click.redditmail.com');
   });
 });

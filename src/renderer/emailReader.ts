@@ -19,7 +19,7 @@ export interface CleanEmail {
 const URL_PATTERN = /https?:\/\/[^\s<>"')]+/gi;
 const INVISIBLE_PATTERN = /[\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
 const SEPARATOR_PATTERN = /^[-_=~]{8,}$/;
-const DECORATION_PATTERN = /^(=>|→|↗)$/;
+const DECORATION_PATTERN = /^(=>|→|↗|subreddit icon|click\.[a-z0-9.-]+)$/i;
 
 const FOOTER_PATTERNS = [
   /unsubscribe/i,
@@ -46,8 +46,15 @@ function decodeEntities(value: string): string {
     .replace(/&#39;/gi, "'");
 }
 
+function removeMarkdownArtifacts(value: string): string {
+  const trimmed = value.trim();
+  if (/^[\[\]\(\)]$/.test(trimmed)) return '';
+  if (/^\[+\s*[^\]]+$/.test(trimmed)) return trimmed.replace(/^\[+\s*/, '').trim();
+  return trimmed;
+}
+
 export function cleanDisplayText(value: string): string {
-  return decodeEntities(value)
+  const cleaned = decodeEntities(value)
     .replace(INVISIBLE_PATTERN, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
@@ -55,6 +62,7 @@ export function cleanDisplayText(value: string): string {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n[ \t]+/g, '\n')
     .trim();
+  return removeMarkdownArtifacts(cleaned);
 }
 
 function compactUrl(rawUrl: string): string {
