@@ -18,7 +18,8 @@ export interface CleanEmail {
 
 const URL_PATTERN = /https?:\/\/[^\s<>"')]+/gi;
 const INVISIBLE_PATTERN = /[\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
-const SEPARATOR_PATTERN = /^[-_=]{8,}$/;
+const SEPARATOR_PATTERN = /^[-_=~]{8,}$/;
+const DECORATION_PATTERN = /^(=>|→|↗)$/;
 
 const FOOTER_PATTERNS = [
   /unsubscribe/i,
@@ -29,6 +30,8 @@ const FOOTER_PATTERNS = [
   /registered trademarks/i,
   /help:\s*https?:/i,
   /stand out and let hirers/i,
+  /tell us what you think/i,
+  /did you find this e-?mail useful/i,
   /privacy policy/i,
   /terms of service/i,
 ];
@@ -72,6 +75,8 @@ function readableUrlLabel(line: string, url: string, index: number): string {
     if (/linkedin\.com/i.test(host) && /\/jobs\/search|search-results/.test(parsed.pathname)) {
       return 'See all jobs';
     }
+    if (/xing\.com/i.test(host) && /browser/i.test(line)) return 'View message in browser';
+    if (/xing\.com/i.test(host) && /search|jobs/i.test(parsed.pathname)) return 'Show search results';
     return host;
   } catch {
     return `Link ${index + 1}`;
@@ -105,7 +110,9 @@ function hasUrl(line: string): boolean {
 }
 
 function pushParagraph(target: CleanEmailPart[], lines: string[]): void {
-  const cleanLines = lines.map(cleanDisplayText).filter(Boolean);
+  const cleanLines = lines
+    .map(cleanDisplayText)
+    .filter((line) => line && !DECORATION_PATTERN.test(line));
   if (cleanLines.length > 0) target.push({ type: 'paragraph', lines: cleanLines });
 }
 
@@ -125,15 +132,26 @@ function addLineParts(
     return;
   }
 
-  const remainingText = cleanDisplayText(line.replace(URL_PATTERN, ''));
-  if (remainingText) pushParagraph(target, [remainingText.replace(/[:\-–—]+$/, '').trim()]);
+  const remainingText = cleanDisplayText(line.replace(URL_PATTERN, ''))
+    .replace(/[:\-–—]+$/, '')
+    .trim();
+  let remainingTextRendered = false;
 
   for (const url of urls) {
+    const label = readableUrlLabel(line, url, linksCollapsed.count);
+    if (
+      remainingText &&
+      !remainingTextRendered &&
+      !urls.some((candidate) => remainingText.toLowerCase() === readableUrlLabel(line, candidate, linksCollapsed.count).toLowerCase())
+    ) {
+      pushParagraph(target, [remainingText]);
+      remainingTextRendered = true;
+    }
     target.push({
       type: 'link',
       link: {
         href: cleanLinkHref(url),
-        label: readableUrlLabel(line, url, linksCollapsed.count),
+        label,
       },
     });
     linksCollapsed.count += 1;
@@ -167,6 +185,7 @@ export function cleanEmailForDisplay(rawText: string): CleanEmail {
       flushHidden();
       continue;
     }
+    if (DECORATION_PATTERN.test(line)) continue;
 
     const hideLine = shouldHideLine(line, footerStarted);
     footerStarted = footerStarted || hideLine;

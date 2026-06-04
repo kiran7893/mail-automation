@@ -30,6 +30,42 @@ Unsubscribe: https://www.linkedin.com/job-alert-email-batch-unsubscribe?token=se
 © 2026 LinkedIn Corporation
 `;
 
+const xingJobAlert = `
+View message in browser https://www.xing.com/mail/browser/abc?tracking=long
+
+XING
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Hi Sai Kiran,
+Check out what our AI-enhanced search found for you
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Be an early applicant
+Duales Studium Informatik (B.Sc.) am Campus oder virtuell
+
+=>
+
+=>
+IU Internationale Hochschule GmbH
+Berlin
+
+Full-time
+
+Show all search results:
+https://www.xing.com/jobs/search?tracking=long
+
+=>
+
+Tell us what you think
+Did you find this e-mail useful?
+No
+xing.com
+Somewhat
+xing.com
+`;
+
 describe('cleanEmailForDisplay', () => {
   it('removes invisible characters and HTML fragments', () => {
     expect(cleanDisplayText('6/3/2026 ͏ <strong class="font-bold">software engineer</strong>')).toBe(
@@ -58,5 +94,20 @@ describe('cleanEmailForDisplay', () => {
     expect(hiddenText).toContain('Unsubscribe');
     expect(cleaned.hiddenLineCount).toBeGreaterThan(0);
     expect(cleaned.rawText).toContain('trackingId=abc');
+  });
+
+  it('cleans XING job alerts without duplicate link labels or arrow markers', () => {
+    const cleaned = cleanEmailForDisplay(xingJobAlert);
+    const visibleText = JSON.stringify(cleaned.visible);
+    const hiddenText = JSON.stringify(cleaned.hiddenFooter);
+
+    expect(visibleText).toContain('View message in browser');
+    expect(visibleText.match(/View message in browser/g)).toHaveLength(1);
+    expect(visibleText).toContain('Duales Studium Informatik');
+    expect(visibleText).toContain('IU Internationale Hochschule GmbH');
+    expect(visibleText).not.toContain('=>');
+    expect(visibleText).not.toContain('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
+    expect(visibleText).not.toContain('Tell us what you think');
+    expect(hiddenText).toContain('Tell us what you think');
   });
 });

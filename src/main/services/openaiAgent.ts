@@ -2,11 +2,23 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AppSettings, CalendarProposal, EmailAnalysis, EmailItem } from '../../shared/types';
 
-const suggestedReplySchema = z.object({
-  title: z.string().min(1).default('Reply'),
-  tone: z.string().min(1).default('professional'),
-  body: z.string().min(1),
-});
+const intentValues = ['reply', 'schedule', 'both', 'none'] as const;
+
+const modelTextSchema = z.preprocess(
+  (value) => (typeof value === 'string' ? cleanModelText(value) : value),
+  z.string().min(1),
+);
+
+const intentSchema = z.preprocess(normalizeIntent, z.enum(intentValues).default('reply'));
+
+const suggestedReplySchema = z.preprocess(
+  normalizeSuggestedReply,
+  z.object({
+    title: modelTextSchema.default('Reply'),
+    tone: modelTextSchema.default('professional'),
+    body: modelTextSchema,
+  }),
+);
 
 const calendarProposalSchema = z.object({
   summary: z.string().min(1),
@@ -20,11 +32,11 @@ const calendarProposalSchema = z.object({
 });
 
 const analysisSchema = z.object({
-  summary: z.string().min(1),
-  intent: z.enum(['reply', 'schedule', 'both', 'none']).default('reply'),
+  summary: modelTextSchema,
+  intent: intentSchema,
   suggestedReplies: z.array(suggestedReplySchema).default([]),
   calendarProposal: calendarProposalSchema.optional(),
-  risks: z.array(z.string()).default([]),
+  risks: z.array(modelTextSchema).default([]),
 });
 
 interface ChatCompletionResponse {
@@ -51,6 +63,49 @@ export function extractJsonObject(text: string): unknown {
     throw new Error('Model response did not contain a JSON object.');
   }
   return JSON.parse(candidate.slice(start, end + 1));
+}
+
+function cleanModelText(value: string): string {
+  return value
+    .replace(/[\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeIntent(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const normalized = cleanModelText(value).toLowerCase();
+  if (intentValues.some((intent) => intent === normalized)) return normalized;
+
+  const wantsReply = /\b(reply|respond|response|answer|draft|send)\b/.test(normalized);
+  const wantsSchedule = /\b(schedule|calendar|meeting|call|appointment|invite)\b/.test(normalized);
+  if (wantsReply && wantsSchedule) return 'both';
+  if (wantsSchedule) return 'schedule';
+  if (/\b(no reply|no response|nothing to do|informational only)\b/.test(normalized)) return 'none';
+  return 'reply';
+}
+
+function normalizeSuggestedReply(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return {
+      title: 'Reply',
+      tone: 'professional',
+      body: value,
+    };
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+
+  const reply = value as Record<string, unknown>;
+  return {
+    title: reply.title ?? reply.label ?? reply.name ?? 'Reply',
+    tone: reply.tone ?? reply.style ?? 'professional',
+    body: reply.body ?? reply.message ?? reply.content ?? reply.text ?? reply.reply,
+  };
 }
 
 function cleanFallbackText(value: string): string {

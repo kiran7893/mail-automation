@@ -92,6 +92,52 @@ describe('extractJsonObject', () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).response_format).toBeUndefined();
   });
 
+  it('normalizes loose OpenRouter JSON into the app analysis shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: '\u200bThe sender confirmed the event registration.',
+                intent: 'To notify the recipient that their event registration has been confirmed.',
+                suggestedReplies: [
+                  'Thanks, I saw this.',
+                  {
+                    label: 'Ask',
+                    style: 'concise',
+                    message: 'Can you send the venue details?',
+                  },
+                ],
+                risks: ['<strong>Review before sending.</strong>'],
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const agent = new OpenAIAgent(async () => settings);
+    const result = await agent.chatCommand('Registration approved.');
+
+    expect(result.intent).toBe('reply');
+    expect(result.summary).toBe('The sender confirmed the event registration.');
+    expect(result.suggestedReplies[0]).toMatchObject({
+      title: 'Reply',
+      tone: 'professional',
+      body: 'Thanks, I saw this.',
+    });
+    expect(result.suggestedReplies[1]).toMatchObject({
+      title: 'Ask',
+      tone: 'concise',
+      body: 'Can you send the venue details?',
+    });
+    expect(result.suggestedReplies).toHaveLength(3);
+    expect(result.risks).toEqual(['Review before sending.']);
+  });
+
   it('includes the LLM failure reason in email fallback risks', async () => {
     vi.stubGlobal(
       'fetch',
