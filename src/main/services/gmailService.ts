@@ -4,6 +4,7 @@ import { simpleParser, type AddressObject } from 'mailparser';
 import type { EmailItem, InboxRefreshResult } from '../../shared/types';
 import type { AppDatabase } from './database';
 import type { GoogleAuthService } from './googleAuth';
+import { isNoReplyAddress, noReplySendError } from './noReply';
 import { nowIso } from './time';
 
 interface ParsedAddress {
@@ -138,6 +139,7 @@ export class GmailService {
   async sendReply(payload: SendReplyPayload): Promise<{ id?: string; threadId?: string }> {
     const email = this.db.getEmail(payload.emailId);
     if (!email) throw new Error(`Email not found: ${payload.emailId}`);
+    if (isNoReplyAddress(email.fromEmail)) throw noReplySendError(email.fromEmail);
     const client = await this.auth.getClient();
     const gmail = google.gmail({ version: 'v1', auth: client });
     const response = await gmail.users.messages.send({

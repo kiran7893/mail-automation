@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EmailItem } from '../shared/types';
-import { buildReplyRaw, decodeBase64Url } from '../main/services/gmailService';
+import { buildReplyRaw, decodeBase64Url, GmailService } from '../main/services/gmailService';
 
 const email: EmailItem = {
   id: 'gmail-1',
@@ -24,4 +24,30 @@ describe('buildReplyRaw', () => {
     expect(decoded).toContain('In-Reply-To: <original@example.com>');
     expect(decoded).toContain('Works for me.');
   });
+});
+
+describe('GmailService.sendReply', () => {
+  it.each([
+    'noreply@redditmail.com',
+    'no-reply@example.com',
+    'do-not-reply@example.com',
+    'donotreply@example.com',
+    'jobalerts-noreply@linkedin.com',
+  ])(
+    'blocks replies to %s before Gmail auth',
+    async (fromEmail) => {
+      const db = {
+        getEmail: vi.fn(() => ({ ...email, fromEmail })),
+      };
+      const auth = {
+        getClient: vi.fn(),
+      };
+      const service = new GmailService(auth as never, db as never);
+
+      await expect(service.sendReply({ emailId: email.id, body: 'Works for me.' })).rejects.toThrow(
+        'Cannot send a reply to no-reply notification address',
+      );
+      expect(auth.getClient).not.toHaveBeenCalled();
+    },
+  );
 });

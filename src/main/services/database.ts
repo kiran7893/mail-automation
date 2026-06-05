@@ -11,6 +11,7 @@ import type {
   EmailStatus,
 } from '../../shared/types';
 import { safeJsonParse, toJson } from './json';
+import { isNoReplyAddress } from './noReply';
 import { nowIso } from './time';
 
 interface EmailRow {
@@ -372,6 +373,47 @@ export class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
       CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at);
     `);
+    this.repairStaleAnalyses();
+  }
+
+  private repairStaleAnalyses(): void {
+    const timestamp = nowIso();
+    this.db.run(
+      `UPDATE email_items
+       SET status = ?, analysis_json = NULL, updated_at = ?
+       WHERE analysis_json LIKE ?
+         AND analysis_json LIKE ?
+         AND analysis_json LIKE ?
+         AND analysis_json LIKE ?`,
+      [
+        'new',
+        timestamp,
+        '%fallback suggestions were generated locally%',
+        '%calendarProposal%',
+        '%expected object%',
+        '%received null%',
+      ],
+    );
+
+    const noReplyEmails = rows<Pick<EmailRow, 'id' | 'from_email'>>(this.db, 'SELECT id, from_email FROM email_items')
+      .filter((email) => isNoReplyAddress(email.from_email));
+    for (const email of noReplyEmails) {
+      this.db.run(
+        `UPDATE actions
+         SET status = ?, error = ?, updated_at = ?
+         WHERE source_email_id = ?
+           AND kind = ?
+           AND status = ?`,
+        [
+          'cancelled',
+          'Reply action cancelled because sender is a no-reply notification address.',
+          timestamp,
+          email.id,
+          'email_reply',
+          'pending',
+        ],
+      );
+    }
   }
 
   private async save(): Promise<void> {

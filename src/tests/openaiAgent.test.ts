@@ -140,6 +140,72 @@ describe('extractJsonObject', () => {
     expect(result.risks).toEqual(['Review before sending.']);
   });
 
+  it('accepts an omitted calendarProposal field', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  summary: 'Registration was approved.',
+                  intent: 'reply',
+                  suggestedReplies: [{ title: 'Thanks', tone: 'brief', body: 'Thank you.' }],
+                  risks: [],
+                }),
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const agent = new OpenAIAgent(async () => settings);
+    const result = await agent.chatCommand('Registration approved.');
+
+    expect(result.summary).toBe('Registration was approved.');
+    expect(result.calendarProposal).toBeUndefined();
+    expect(result.risks).toEqual([]);
+  });
+
+  it('drops only a malformed optional calendar proposal when the rest is valid', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  summary: 'The Reddit notification contains a story idea post.',
+                  intent: 'reply',
+                  suggestedReplies: [{ title: 'Ask', tone: 'collaborative', body: 'Can you share more details?' }],
+                  calendarProposal: {
+                    summary: 'Story idea follow-up',
+                  },
+                  risks: [],
+                }),
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const agent = new OpenAIAgent(async () => settings);
+    const result = await agent.analyzeEmail(email);
+
+    expect(result.summary).toBe('The Reddit notification contains a story idea post.');
+    expect(result.calendarProposal).toBeUndefined();
+    expect(result.risks).toContain(
+      'Calendar proposal was omitted because the model returned incomplete calendar details.',
+    );
+    expect(result.risks.join(' ')).not.toContain('fallback suggestions were generated locally');
+  });
+
   it('includes the LLM failure reason in email fallback risks', async () => {
     vi.stubGlobal(
       'fetch',

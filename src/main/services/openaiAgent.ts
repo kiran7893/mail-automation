@@ -51,6 +51,11 @@ const analysisSchema = z.object({
   risks: risksSchema,
 });
 
+type ParsedAnalysis = z.infer<typeof analysisSchema>;
+
+const droppedCalendarProposalRisk =
+  'Calendar proposal was omitted because the model returned incomplete calendar details.';
+
 interface ChatCompletionResponse {
   choices?: Array<{
     message?: {
@@ -75,6 +80,24 @@ export function extractJsonObject(text: string): unknown {
     throw new Error('Model response did not contain a JSON object.');
   }
   return JSON.parse(candidate.slice(start, end + 1));
+}
+
+function parseAnalysis(value: unknown): ParsedAnalysis {
+  const direct = analysisSchema.safeParse(value);
+  if (direct.success) return direct.data;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw direct.error;
+
+  const withoutCalendarProposal = {
+    ...(value as Record<string, unknown>),
+    calendarProposal: undefined,
+  };
+  const salvaged = analysisSchema.safeParse(withoutCalendarProposal);
+  if (!salvaged.success) throw direct.error;
+
+  return {
+    ...salvaged.data,
+    risks: appendUniqueRisk(salvaged.data.risks, droppedCalendarProposalRisk),
+  };
 }
 
 function cleanModelText(value: string): string {
@@ -127,6 +150,10 @@ function normalizeArrayField(value: unknown): unknown {
   return [value];
 }
 
+function appendUniqueRisk(risks: string[], risk: string): string[] {
+  return risks.includes(risk) ? risks : [...risks, risk];
+}
+
 function cleanFallbackText(value: string): string {
   return value
     .replace(/[\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, '')
@@ -158,7 +185,7 @@ function supportsResponseFormatRetry(message: string): boolean {
   return /response_format|json[_ -]?object|json_schema|unsupported|not support|invalid parameter/i.test(message);
 }
 
-function withIds(analysis: z.infer<typeof analysisSchema>, emailId?: string): EmailAnalysis {
+function withIds(analysis: ParsedAnalysis, emailId?: string): EmailAnalysis {
   const suggestedReplies = analysis.suggestedReplies.slice(0, 3).map((reply) => ({
     id: randomUUID(),
     title: reply.title,
@@ -219,8 +246,25 @@ function systemPrompt(): string {
     'Return only valid JSON. Do not send emails or create calendar events.',
     'Every action needs human approval later, so your job is only summarization and draft preparation.',
     'If a meeting should be scheduled, include a calendarProposal with RFC3339 start/end times and attendee emails.',
+    'If no meeting should be scheduled, set calendarProposal to null.',
     'If dates are ambiguous, do not invent a time; include the ambiguity in risks.',
   ].join('\n');
+}
+
+function calendarProposalInstructions(): Record<string, unknown> {
+  return {
+    rule: 'Return null unless scheduling is explicit. If scheduling is explicit, return this object shape.',
+    objectShape: {
+      summary: 'meeting title',
+      description: 'context',
+      attendees: ['person@example.com'],
+      start: 'RFC3339 timestamp',
+      end: 'RFC3339 timestamp',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      needsCalendarInvite: true,
+      rationale: 'why this time/event',
+    },
+  };
 }
 
 function analysisInstruction(email: EmailItem): string {
@@ -235,17 +279,11 @@ function analysisInstruction(email: EmailItem): string {
           { title: 'Disagree', tone: 'direct', body: 'reply body' },
           { title: 'Edit needed', tone: 'collaborative', body: 'reply body' },
         ],
-        calendarProposal: {
-          summary: 'meeting title',
-          description: 'context',
-          attendees: ['person@example.com'],
-          start: 'RFC3339 timestamp',
-          end: 'RFC3339 timestamp',
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-          needsCalendarInvite: true,
-          rationale: 'why this time/event',
-        },
+        calendarProposal: null,
         risks: ['approval or ambiguity notes'],
+      },
+      fieldRules: {
+        calendarProposal: calendarProposalInstructions(),
       },
       email: {
         from: email.fromEmail,
@@ -273,17 +311,11 @@ function chatInstruction(command: string): string {
         summary: 'short summary',
         intent: 'reply | schedule | both | none',
         suggestedReplies: [{ title: 'Option', tone: 'tone', body: 'message body' }],
-        calendarProposal: {
-          summary: 'meeting title',
-          description: 'context',
-          attendees: ['person@example.com'],
-          start: 'RFC3339 timestamp',
-          end: 'RFC3339 timestamp',
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-          needsCalendarInvite: true,
-          rationale: 'why this time/event',
-        },
+        calendarProposal: null,
         risks: ['ambiguities'],
+      },
+      fieldRules: {
+        calendarProposal: calendarProposalInstructions(),
       },
     },
     null,
@@ -314,7 +346,7 @@ export class OpenAIAgent {
     return withIds(parsed, email.id);
   }
 
-  private async complete(userContent: string): Promise<z.infer<typeof analysisSchema>> {
+  private async complete(userContent: string): Promise<ParsedAnalysis> {
     const settings = await this.settingsProvider();
     if (!settings.openai.apiKey) {
       throw new Error('OPENAI_API_KEY is missing.');
@@ -348,7 +380,7 @@ export class OpenAIAgent {
 
     const content = data.choices?.[0]?.message?.content;
     if (!content) throw new Error('Model returned no content.');
-    return analysisSchema.parse(extractJsonObject(content));
+    return parseAnalysis(extractJsonObject(content));
   }
 
   private async chatCompletion(

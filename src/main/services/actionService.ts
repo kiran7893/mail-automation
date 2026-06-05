@@ -10,6 +10,7 @@ import type {
 import type { AppDatabase } from './database';
 import type { GmailService } from './gmailService';
 import type { CalendarService } from './calendarService';
+import { isNoReplyAddress, noReplySendError, NO_REPLY_RISK } from './noReply';
 import { nowIso } from './time';
 
 interface ReplyActionPayload {
@@ -22,6 +23,16 @@ interface CalendarActionPayload {
   proposal: CalendarProposal;
 }
 
+function withNoReplyRisk(email: EmailItem, analysis: EmailAnalysis): EmailAnalysis {
+  if (!isNoReplyAddress(email.fromEmail) || analysis.risks.includes(NO_REPLY_RISK)) {
+    return analysis;
+  }
+  return {
+    ...analysis,
+    risks: [...analysis.risks, NO_REPLY_RISK],
+  };
+}
+
 export class ActionService {
   constructor(
     private readonly db: AppDatabase,
@@ -30,8 +41,9 @@ export class ActionService {
   ) {}
 
   async persistAnalysis(email: EmailItem, analysis: EmailAnalysis): Promise<EmailAnalysis> {
-    const actions = await this.createActions(analysis, email.id);
-    const next = this.attachActionIds(analysis, actions);
+    const safeAnalysis = withNoReplyRisk(email, analysis);
+    const actions = await this.createActions(safeAnalysis, email.id, email);
+    const next = this.attachActionIds(safeAnalysis, actions);
     await this.db.setEmailAnalysis(email.id, next);
     await this.db.addAudit({
       id: randomUUID(),
@@ -130,6 +142,7 @@ export class ActionService {
   async sendEditedReply(emailId: string, body: string): Promise<ActionRecord> {
     const email = this.db.getEmail(emailId);
     if (!email) throw new Error(`Email not found: ${emailId}`);
+    if (isNoReplyAddress(email.fromEmail)) throw noReplySendError(email.fromEmail);
     const action: ActionRecord<ReplyActionPayload> = {
       id: randomUUID(),
       kind: 'email_reply',
@@ -170,10 +183,12 @@ export class ActionService {
   private async createActions(
     analysis: EmailAnalysis,
     emailId?: string,
+    sourceEmail?: EmailItem,
   ): Promise<ActionRecord[]> {
     const actions: ActionRecord[] = [];
+    const canCreateReplyActions = Boolean(emailId) && !isNoReplyAddress(sourceEmail?.fromEmail);
     for (const reply of analysis.suggestedReplies) {
-      if (!emailId) continue;
+      if (!emailId || !canCreateReplyActions) continue;
       const action: ActionRecord<ReplyActionPayload> = {
         id: randomUUID(),
         kind: 'email_reply',
